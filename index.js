@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -26,11 +26,24 @@ async function run() {
 
     const parcelCollection = client.db("parcelDB").collection("parcels");
 
+    // Get all parcels OR parcels by user (create_by), sorted by latest
     app.get("/parcels", async (req, res) => {
-      const parcels = await parcelCollection.find().toArray();
-      res.send(parcels);
+      try {
+        const userEmail = req.query.email;
+
+        const query = userEmail ? { created_by: userEmail } : {};
+        const options = {
+          sort: { createdAt: -1 },
+        };
+
+        const parcels = await parcelCollection.find(query, options).toArray();
+        res.send(parcels);
+      } catch (error) {
+        res.status(500).send({ message: "Server error", error: error.message });
+      }
     });
 
+    // Parcel add api
     app.post("/parcels", async (req, res) => {
       try {
         const newParcel = req.body;
@@ -39,6 +52,25 @@ async function run() {
       } catch (err) {
         console.error("Error insertig parcel:", err);
         res.status(500).send({ message: "Failed to create parcel" });
+      }
+    });
+
+    //MyParcel delete api
+    app.delete("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await parcelCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount > 0) {
+          res.send({ success: true, message: "Parcel deleted" });
+        } else {
+          res.status(404).send({ success: false, message: "Parcel not found" });
+        }
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
       }
     });
 
