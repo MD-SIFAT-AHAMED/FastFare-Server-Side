@@ -43,6 +43,33 @@ async function run() {
       }
     });
 
+    // get id search by id
+    app.get("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        if (!ObjectId.isValid(id)) {
+          return res
+            .status(400)
+            .send({ success: false, message: "Invalid ID" });
+        }
+
+        const parcel = await parcelCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!parcel) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Parcel not found" });
+        }
+
+        res.send({ success: true, data: parcel });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
     // Parcel add api
     app.post("/parcels", async (req, res) => {
       try {
