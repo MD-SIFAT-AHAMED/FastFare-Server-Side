@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const Stripe = require("stripe");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
@@ -11,6 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.sfxielf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+const stripe = Stripe(process.env.PAYMENT_GATEWAY_KEY); // get from your stripe dashboard
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -25,6 +27,7 @@ async function run() {
     await client.connect();
 
     const parcelCollection = client.db("parcelDB").collection("parcels");
+    const paymentCollection = client.db("parcelDB").collection("payments");
 
     // Get all parcels OR parcels by user (create_by), sorted by latest
     app.get("/parcels", async (req, res) => {
@@ -98,6 +101,85 @@ async function run() {
         }
       } catch (error) {
         res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    // payment history for user
+    app.get("/payments/user/:email", async (req, res) => {
+      const userEmail = req.params.email;
+
+      try {
+        const history = await paymentCollection
+          .find({ userEmail })
+          .sort({ paid_at: -1 }) // descending
+          .toArray();
+
+        res.send(history);
+      } catch (error) {
+        res.status(500).send({ error: "Could not fetch user payment history" });
+      }
+    });
+
+    // payment history for admin
+    app.get("/payments", async (req, res) => {
+      try {
+        const allPayments = await paymentCollection
+          .find()
+          .sort({ paid_at: -1 })
+          .toArray();
+        res.send(allPayments);
+      } catch (error) {
+        res.status(500).send({ error: "Could not fetch payment history" });
+      }
+    });
+
+    // create payment intent api
+    app.post("/create-payment-intent", async (req, res) => {
+      const { amount } = req.body;
+
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount, // in cents
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+
+        res.send({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    // Update paymant and create payment history
+    app.post("/payments", async (req, res) => {
+      const { parcelId, userEmail, amount, transactionId } = req.body;
+
+      try {
+        // 1. Update parcel payment_status
+        await parcelCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          { $set: { payment_status: "paid" } }
+        );
+
+        // 2. Save payment info
+        const paymentDoc = {
+          parcelId,
+          userEmail,
+          amount,
+          transactionId,
+          // paymentMethod,
+          paid_at_string: new Date().toISOString(),
+          paid_at: new Date(),
+        };
+
+        const result = await paymentCollection.insertOne(paymentDoc);
+
+        res.send({ message: "Payment saved", paymentId: result.insertedId });
+      } catch (error) {
+        console.error("Error saving payment:", error);
+        res.status(500).send({ error: "Payment failed" });
       }
     });
 
