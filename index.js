@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 const Stripe = require("stripe");
+const admin = require("firebase-admin");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
@@ -10,6 +11,12 @@ const port = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+const serviceAccount = require("./firebase_admin_key.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.sfxielf.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 const stripe = Stripe(process.env.PAYMENT_GATEWAY_KEY); // get from your stripe dashboard
@@ -26,11 +33,66 @@ async function run() {
   try {
     await client.connect();
 
-    const parcelCollection = client.db("parcelDB").collection("parcels");
-    const paymentCollection = client.db("parcelDB").collection("payments");
+    const db = client.db("parcelDB");
+    const parcelCollection = db.collection("parcels");
+    const paymentCollection = db.collection("payments");
+    const usersCollection = db.collection("users");
+
+    // Custom middlewares
+    const verifyToken = async (req, res, next) => {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) {
+        return res.status(401).send({ message: "unAuthorized access" });
+      }
+      const token = authHeader.split(" ")[1];
+      if (!token) {
+        return res.status(401).send({ message: "unAuthorized access" });
+      }
+
+      // Verify token
+      try {
+        const decodedUser = await admin.auth().verifyIdToken(token);
+        req.decoded = decodedUser;
+      } catch (err) {
+        res.status(401).send({ message: "Unauthorized - Invalid token" });
+      }
+      next();
+    };
+
+    const verifyEmailToken = async (req, res, next) => {
+      const email = req.query.email || req.body.email || req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "Forbidden Access" });
+      }
+      next();
+    };
+
+    app.post("/users", async (req, res) => {
+      const email = req.body.email;
+      const emailExists = await usersCollection.findOne({ email });
+      if (emailExists) {
+        // update last log in
+        const updateResult = usersCollection.updateOne(
+          { email },
+          {
+            $set: {
+              last_log_in: new Date().toISOString(),
+            },
+          }
+        );
+        return res.status(200).send({
+          message: "user already exists",
+          inserted: false,
+          update: (await updateResult).modifiedCount > 0,
+        });
+      }
+      const user = req.body;
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
 
     // Get all parcels OR parcels by user (create_by), sorted by latest
-    app.get("/parcels", async (req, res) => {
+    app.get("/parcels",verifyToken, async (req, res) => {
       try {
         const userEmail = req.query.email;
 
@@ -46,8 +108,8 @@ async function run() {
       }
     });
 
-    // get id search by id
-    app.get("/parcels/:id", async (req, res) => {
+    // get parcles search by id
+    app.get("/parcels/:id",verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -74,7 +136,7 @@ async function run() {
     });
 
     // Parcel add api
-    app.post("/parcels", async (req, res) => {
+    app.post("/parcels",verifyToken, async (req, res) => {
       try {
         const newParcel = req.body;
         const result = await parcelCollection.insertOne(newParcel);
@@ -85,8 +147,29 @@ async function run() {
       }
     });
 
+    // Traking parcel post Api
+    app.post("/tracking", async (req, res) => {
+      const {
+        traking_id,
+        parcel_id,
+        status,
+        message,
+        updated_by = "",
+      } = req.body;
+      const log = {
+        traking_id,
+        parcel_id: parcel_id ? new ObjectId(parcel_id) : undefined,
+        status,
+        message,
+        time: new Date(),
+        updated_by,
+      };
+      const result = await trackingCollection.insertOne(log);
+      res.send({ success: true, insertedId: result.insertedId });
+    });
+
     //MyParcel delete api
-    app.delete("/parcels/:id", async (req, res) => {
+    app.delete("/parcels/:id",verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -105,7 +188,7 @@ async function run() {
     });
 
     // payment history for user
-    app.get("/payments/user/:email", async (req, res) => {
+    app.get("/payments/user/:email", verifyToken, async (req, res) => {
       const userEmail = req.params.email;
 
       try {
@@ -121,7 +204,7 @@ async function run() {
     });
 
     // payment history for admin
-    app.get("/payments", async (req, res) => {
+    app.get("/payments",verifyToken, async (req, res) => {
       try {
         const allPayments = await paymentCollection
           .find()
@@ -153,7 +236,7 @@ async function run() {
     });
 
     // Update paymant and create payment history
-    app.post("/payments", async (req, res) => {
+    app.post("/payments", verifyToken, async (req, res) => {
       const { parcelId, userEmail, amount, transactionId } = req.body;
 
       try {
