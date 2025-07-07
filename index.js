@@ -37,14 +37,17 @@ async function run() {
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
     const usersCollection = db.collection("users");
+    const ridersCollection = db.collection("riders");
 
     // Custom middlewares
     const verifyToken = async (req, res, next) => {
       const authHeader = req.headers.authorization;
+
       if (!authHeader) {
         return res.status(401).send({ message: "unAuthorized access" });
       }
       const token = authHeader.split(" ")[1];
+      console.log(token);
       if (!token) {
         return res.status(401).send({ message: "unAuthorized access" });
       }
@@ -53,10 +56,10 @@ async function run() {
       try {
         const decodedUser = await admin.auth().verifyIdToken(token);
         req.decoded = decodedUser;
+        next();
       } catch (err) {
         res.status(401).send({ message: "Unauthorized - Invalid token" });
       }
-      next();
     };
 
     const verifyEmailToken = async (req, res, next) => {
@@ -92,7 +95,7 @@ async function run() {
     });
 
     // Get all parcels OR parcels by user (create_by), sorted by latest
-    app.get("/parcels",verifyToken, async (req, res) => {
+    app.get("/parcels", verifyToken, async (req, res) => {
       try {
         const userEmail = req.query.email;
 
@@ -109,7 +112,7 @@ async function run() {
     });
 
     // get parcles search by id
-    app.get("/parcels/:id",verifyToken, async (req, res) => {
+    app.get("/parcels/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -136,7 +139,7 @@ async function run() {
     });
 
     // Parcel add api
-    app.post("/parcels",verifyToken, async (req, res) => {
+    app.post("/parcels", verifyToken, async (req, res) => {
       try {
         const newParcel = req.body;
         const result = await parcelCollection.insertOne(newParcel);
@@ -145,6 +148,45 @@ async function run() {
         console.error("Error insertig parcel:", err);
         res.status(500).send({ message: "Failed to create parcel" });
       }
+    });
+
+    // Rider application post api
+    app.post("/riders", async (req, res) => {
+      const riderData = req.body;
+      const result = await ridersCollection.insertOne(riderData);
+      res.send(result);
+    });
+
+    // All pending riders
+    app.get("/pending", async (req, res) => {
+      try {
+        const pendingRiders = await ridersCollection
+          .find({ status: "pending" })
+          .toArray();
+        res.send(pendingRiders);
+      } catch (error) {
+        console.error("Error fetching pending riders:", error);
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+
+    // Pending rider status update
+    app.patch("/riders/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await ridersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "approved" } }
+      );
+      res.send(result);
+    });
+
+    // Pending rider delele
+    app.delete("/riders/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await ridersCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
     });
 
     // Traking parcel post Api
@@ -169,7 +211,7 @@ async function run() {
     });
 
     //MyParcel delete api
-    app.delete("/parcels/:id",verifyToken, async (req, res) => {
+    app.delete("/parcels/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -204,7 +246,7 @@ async function run() {
     });
 
     // payment history for admin
-    app.get("/payments",verifyToken, async (req, res) => {
+    app.get("/payments", verifyToken, async (req, res) => {
       try {
         const allPayments = await paymentCollection
           .find()
