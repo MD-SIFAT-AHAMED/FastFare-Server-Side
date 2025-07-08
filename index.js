@@ -170,24 +170,33 @@ async function run() {
       }
     });
 
+    // All active rider show api
+    app.get("/riders/acitve", async (req, res) => {
+      const result = await ridersCollection
+        .find({ status: "active" })
+        .toArray();
+      res.send(result);
+    });
+
     // Pending rider status update
     app.patch("/riders/:id", async (req, res) => {
       const id = req.params.id;
+      const { status } = req.body;
       const result = await ridersCollection.updateOne(
         { _id: new ObjectId(id) },
-        { $set: { status: "approved" } }
+        { $set: { status: status } }
       );
       res.send(result);
     });
 
     // Pending rider delele
-    app.delete("/riders/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await ridersCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.send(result);
-    });
+    // app.delete("/riders/:id", async (req, res) => {
+    //   const id = req.params.id;
+    //   const result = await ridersCollection.deleteOne({
+    //     _id: new ObjectId(id),
+    //   });
+    //   res.send(result);
+    // });
 
     // Traking parcel post Api
     app.post("/tracking", async (req, res) => {
