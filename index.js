@@ -103,7 +103,7 @@ async function run() {
     });
 
     // Make admin and remove admin
-    app.patch("/users/:id/role", verifyToken,verifyAdmin, async (req, res) => {
+    app.patch("/users/:id/role", verifyToken, verifyAdmin, async (req, res) => {
       const { id } = req.params;
       const { role } = req.body;
 
@@ -174,9 +174,13 @@ async function run() {
     // Get all parcels OR parcels by user (create_by), sorted by latest
     app.get("/parcels", verifyToken, async (req, res) => {
       try {
-        const userEmail = req.query.email;
+        const { email, delivery_status, payment_status } = req.query;
 
-        const query = userEmail ? { created_by: userEmail } : {};
+        const query = {};
+        if (email) query.created_by = email;
+        if (delivery_status) query.delivery_status = delivery_status;
+        if (payment_status) query.payment_status = payment_status;
+
         const options = {
           sort: { createdAt: -1 },
         };
@@ -235,7 +239,7 @@ async function run() {
     });
 
     // All pending riders
-    app.get("/pending", verifyToken,verifyAdmin, async (req, res) => {
+    app.get("/pending", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const pendingRiders = await ridersCollection
           .find({ status: "pending" })
@@ -248,11 +252,62 @@ async function run() {
     });
 
     // All active rider show api
-    app.get("/riders/acitve", verifyToken, async (req, res) => {
-      const result = await ridersCollection
-        .find({ status: "active" })
-        .toArray();
-      res.send(result);
+    app.get("/riders/active", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const { district } = req.query;
+        const filter = { status: "active" };
+
+        if (district) {
+          filter.district = district;
+        }
+
+        const result = await ridersCollection.find(filter).toArray();
+        res.send(result);
+      } catch (error) {
+        res
+          .status(500)
+          .send({ message: "Failed to load riders", error: error.message });
+      }
+    });
+
+    // Assign rider status update
+    app.patch("/parcels/assignRider/:id", async (req, res) => {
+      try {
+        const parcelId = req.params.id;
+        const { riderEmail } = req.body;
+
+        if (!riderEmail) {
+          return res.status(400).send({ message: "Rider email is required" });
+        }
+
+        // Update rider's status to "on_delivery"
+        const riderUpdate = await ridersCollection.updateOne(
+          { email: riderEmail },
+          { $set: { status: "on_delivery" } }
+        );
+
+        // Update parcel with assigned rider and status
+        const parcelUpdate = await parcelCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          {
+            $set: {
+              assigned_to: riderEmail,
+              delivery_status: "assigned",
+            },
+          }
+        );
+
+        res.send({
+          message: "Assignment successful",
+          parcelUpdate,
+          riderUpdate,
+        });
+      } catch (error) {
+        res.status(500).send({
+          message: "Failed to assign rider",
+          error: error.message,
+        });
+      }
     });
 
     // Pending rider status update
