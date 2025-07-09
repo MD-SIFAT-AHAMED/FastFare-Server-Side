@@ -70,6 +70,16 @@ async function run() {
       next();
     };
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      next();
+    };
+
     // user search by email
     app.get("/users/search", async (req, res) => {
       const emailQuery = req.query.email;
@@ -93,10 +103,9 @@ async function run() {
     });
 
     // Make admin and remove admin
-    app.patch("/users/:id/role", async (req, res) => {
+    app.patch("/users/:id/role", verifyToken,verifyAdmin, async (req, res) => {
       const { id } = req.params;
       const { role } = req.body;
-      
 
       if (!["admin", "user"].includes(role)) {
         return res.status(400).send({ message: "invalid role" });
@@ -109,6 +118,32 @@ async function run() {
         res.send({ message: `User role updated to ${role}`, result });
       } catch (err) {
         res.status(500).send({ message: "Failed to update user role" });
+      }
+    });
+
+    // Get user role
+    app.get("/users/role", async (req, res) => {
+      const { email } = req.query;
+
+      if (!email) {
+        return res
+          .status(400)
+          .send({ message: "Email query param is required" });
+      }
+
+      try {
+        const user = await usersCollection.findOne(
+          { email: email },
+          { projection: { role: 1, email: 1 } }
+        );
+
+        if (!user) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send({ role: user.role, email: user.email });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to fetch user role" });
       }
     });
 
@@ -200,7 +235,7 @@ async function run() {
     });
 
     // All pending riders
-    app.get("/pending", async (req, res) => {
+    app.get("/pending", verifyToken,verifyAdmin, async (req, res) => {
       try {
         const pendingRiders = await ridersCollection
           .find({ status: "pending" })
@@ -213,7 +248,7 @@ async function run() {
     });
 
     // All active rider show api
-    app.get("/riders/acitve", async (req, res) => {
+    app.get("/riders/acitve", verifyToken, async (req, res) => {
       const result = await ridersCollection
         .find({ status: "active" })
         .toArray();
