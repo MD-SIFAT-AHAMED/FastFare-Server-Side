@@ -70,6 +70,48 @@ async function run() {
       next();
     };
 
+    // user search by email
+    app.get("/users/search", async (req, res) => {
+      const emailQuery = req.query.email;
+      if (!emailQuery) {
+        return res.status(400).send({ message: "Missing email query" });
+      }
+
+      const regex = new RegExp(emailQuery, "i"); // case-insensitive partial match
+
+      try {
+        const users = await usersCollection
+          .find({ email: { $regex: regex } })
+          // .project({ email: 1, createdAt: 1, role: 1 })
+          .limit(10)
+          .toArray();
+        res.send(users);
+      } catch (error) {
+        console.error("Error searching users", error);
+        res.status(500).send({ message: "Error searching users" });
+      }
+    });
+
+    // Make admin and remove admin
+    app.patch("/users/:id/role", async (req, res) => {
+      const { id } = req.params;
+      const { role } = req.body;
+      
+
+      if (!["admin", "user"].includes(role)) {
+        return res.status(400).send({ message: "invalid role" });
+      }
+      try {
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } }
+        );
+        res.send({ message: `User role updated to ${role}`, result });
+      } catch (err) {
+        res.status(500).send({ message: "Failed to update user role" });
+      }
+    });
+
     app.post("/users", async (req, res) => {
       const email = req.body.email;
       const emailExists = await usersCollection.findOne({ email });
@@ -181,11 +223,20 @@ async function run() {
     // Pending rider status update
     app.patch("/riders/:id", async (req, res) => {
       const id = req.params.id;
-      const { status } = req.body;
+      const { status, email } = req.body;
       const result = await ridersCollection.updateOne(
         { _id: new ObjectId(id) },
         { $set: { status: status } }
       );
+
+      // Update user Role
+      if (status === "active") {
+        const roleResult = await usersCollection.updateOne(
+          { email },
+          { $set: { role: "rider" } }
+        );
+        res.send;
+      }
       res.send(result);
     });
 
