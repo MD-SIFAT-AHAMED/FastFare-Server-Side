@@ -296,7 +296,6 @@ async function run() {
             },
           }
         );
-
         res.send({
           message: "Assignment successful",
           parcelUpdate,
@@ -305,6 +304,56 @@ async function run() {
       } catch (error) {
         res.status(500).send({
           message: "Failed to assign rider",
+          error: error.message,
+        });
+      }
+    });
+
+    // Get rider assing pending data
+    app.get("/rider/parcels", verifyToken, async (req, res) => {
+      try {
+        const { email } = req.query;
+
+        if (!email) {
+          return res.status(400).send({ message: "Rider email is required" });
+        }
+
+        const query = {
+          assigned_to: email,
+          delivery_status: { $in: ["assigned", "in_transit"] },
+        };
+
+        const parcels = await parcelCollection.find(query).toArray();
+        res.send(parcels);
+      } catch (error) {
+        res.status(500).send({
+          message: "Failed to fetch rider parcels",
+          error: error.message,
+        });
+      }
+    });
+
+    // Update parcel information when rider parcel picked up or delivered
+    app.patch("/parcels/:id/status", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { delivery_status } = req.body;
+
+        if (
+          !["assigned", "in_transit", "delivered"].includes(delivery_status)
+        ) {
+          return res.status(400).send({ message: "Invalid status" });
+        }
+
+        const result = await parcelCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { delivery_status } }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: "Failed to update delivery status",
           error: error.message,
         });
       }
